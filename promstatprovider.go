@@ -11,10 +11,9 @@ import (
 
 func init() {
 	prometheus.DefaultRegisterer.MustRegister(query_duration)
-	http.Handle("/metrics2", promhttp.Handler())
+	http.Handle("/metrics2", promhttp.Handler()) // don't want to shadow prom /metrics
 }
 
-// TODO: register this with global endpoin
 var query_duration = prometheus.NewSummaryVec(prometheus.SummaryOpts{
 	Name: "dashcache_duration",
 	Help: "How long requests take to serve",
