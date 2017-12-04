@@ -1,0 +1,44 @@
+* DashCache - a dashboard focused caching tool for prometheus
+
+DashCache is a proxy for prometheus which can accelerate the common case of
+graphing a time range, and then asking for almost the same data 1m later but shifted
+1m.
+
+The idea is that you can serve the same content 1m later, but chop off the previous minute and query prom
+for what's happened in the last minute.
+
+Ancedotally it makes many of my production workloads 4x - 50x faster.
+
+It leverages the postgres range datatype and GIST indexes to make range overlap queries pretty efficient.
+
+Warning: this is pre-alpha. I literally don't even know if it will continue to work after a couple days, or how aggressively
+old cache entries need to be purged, or how the efficient-looking postgres query plans will scale as the dataset gets larger.
+
+Below: query plan for cache fetch query, which essentially says: "Look for entries matching my query and step values that are to the left of the current range
+and also intersect with the current range. Order by tsrange and give me the first match.
+
+
+#+BEGIN_SRC sql
+ Limit  (cost=9.53..9.54 rows=1 width=64) (actual time=0.044..0.044 rows=0 loops=1)
+   ->  Sort  (cost=9.53..9.54 rows=1 width=64) (actual time=0.043..0.043 rows=0 loops=1)
+         Sort Key: tsrange DESC
+         Sort Method: quicksort  Memory: 25kB
+         ->  Bitmap Heap Scan on query_cache  (cost=4.16..9.52 rows=1 width=64) (actual time=0.010..0.010 rows=0 loops=1)
+               Recheck Cond: ((tsrange &< '[1511834338,1511841538)'::int8range) AND (tsrange && '[1511834338,1511841538)'::int8range))
+               Filter: ((tsrange <> '[1511834338,1511841538)'::int8range) AND (query = 'sum(odnd_fetchCount{origin="www_walmart_com"})'::text) AND (step = 20))
+               ->  Bitmap Index Scan on query_cache_tsrange  (cost=0.00..4.16 rows=2 width=0) (actual time=0.006..0.006 rows=0 loops=1)
+                     Index Cond: ((tsrange &< '[1511834338,1511841538)'::int8range) AND (tsrange && '[1511834338,1511841538)'::int8range))
+ Planning time: 0.629 ms
+ Execution time: 0.109 ms
+(11 rows)
+#+END_SRC
+
+
+** Building
+
+The daemon is in the root of the repo: go get github.com/shanemhansen/dashcache
+
+** Running
+
+Dashcache requires a postgres database. It does not auto-create the schema or anything. The [[file:schema.sql][schema file]] has a schema with the proper index setup.
+
